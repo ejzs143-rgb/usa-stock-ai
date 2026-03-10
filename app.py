@@ -2,21 +2,32 @@ import streamlit as st
 import pandas as pd
 import os
 
-st.set_page_config(page_title="米国株 クオンツ格付け", layout="wide")
-st.title("📈 米国株 プロ仕様・クオンツ格付け")
+st.set_page_config(page_title="米国株 AI格付け", layout="wide")
+st.title("📱 米国株 自分専用リモコン・ランキング")
+st.write("専門知識は不要です。あなたの好みに合わせて、AIが全米500社を瞬時に並び替えます。")
 
-# 裏側でデータが作られているかチェック
+# データ読み込み（裏で集めた確実なデータを使います）
 if not os.path.exists('raw_stock_data.csv'):
-    st.warning("現在、初回データを収集中です。GitHub Actionsでの実行が完了するまでお待ちください。")
+    st.warning("現在、裏側のシステムでデータを収集中です。")
     st.stop()
-
-# 爆速でデータを読み込む
 df = pd.read_csv('raw_stock_data.csv')
 
-# --- サイドメニュー ---
-st.sidebar.header("⚙️ 投資戦略の調整")
+# --- サイドメニュー（あなたの専用リモコン） ---
+st.sidebar.header("🕹️ あなたの好みを設定")
+
 max_p = st.sidebar.slider("1株の予算 (ドル)", 10, 500, 150)
-strategy = st.sidebar.radio("戦略の選択", ["バランス型", "逆張り（売られすぎ狙い）", "王道（割安＆黒字）"])
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎯 どんな株を狙う？")
+# ここが初心者に優しいUI！ボタン一つで裏の計算式が切り替わります
+strategy = st.sidebar.radio(
+    "AIに探させる戦略を選んでください", 
+    [
+        "📈 勢いに乗る（みんなが買ってる人気株）", 
+        "📉 暴落を拾う（パニックで売られたお買い得株）", 
+        "⚖️ 王道バランス（業績が良くて普通の株）"
+    ]
+)
 
 # --- 瞬時スコアリング ---
 filtered_df = df[df['株価'] <= max_p].copy()
@@ -26,52 +37,52 @@ def calculate_score(row):
     per = row['PER']
     eps = row['EPS']
     rsi = row['RSI']
-    ma50 = row['MA50']
-    price = row['株価']
     
-    # 1. 絶対条件（黒字企業か？）
+    # 1. 絶対条件（ちゃんと利益を出している会社か？）
     if eps > 0: score += 20
-    else: score -= 50 # 赤字は大幅減点
+    else: score -= 50 # 赤字の会社は問答無用で減点
     
-    # 2. 割安性（PER）
-    if per > 0 and per < 15: score += 20
-    elif per >= 15 and per < 25: score += 10
-    
-    # 3. テクニカル指標（RSI）: プロが重視する「買われすぎ/売られすぎ」
-    if rsi < 30: score += 30 # 売られすぎ（大チャンス）
-    elif rsi < 40: score += 15 # やや売られすぎ（買い場）
-    elif rsi > 70: score -= 30 # 買われすぎ（高値掴み危険）
-    
-    # 4. トレンド乖離（MA50）
-    if ma50 > 0:
-        dev = (price - ma50) / ma50
-        if dev > 0.15: score -= 20 # 移動平均から上に離れすぎ
-        elif dev < 0.05: score += 10 # 移動平均付近で安全
-        
-    # 戦略ボーナス
-    if strategy == "逆張り（売られすぎ狙い）" and rsi < 35: score += 30
-    if strategy == "王道（割安＆黒字）" and eps > 0 and per > 0 and per < 15: score += 30
-        
+    # 2. 割安度（PER：本来の価値より安いか？）
+    if 0 < per < 15: score += 20
+    elif 15 <= per < 25: score += 10
+
+    # 3. 戦略によるAI配点の変化（ここでプロの思考回路を切り替えます）
+    if strategy == "📈 勢いに乗る（みんなが買ってる人気株）":
+        if 50 <= rsi <= 70: score += 30 # 順調に上がっている株にボーナス
+        elif rsi > 75: score -= 30 # さすがに上がりすぎ（バブル）は危険回避
+        elif rsi < 40: score -= 20 # 下がっている株は容赦なく切り捨て
+
+    elif strategy == "📉 暴落を拾う（パニックで売られたお買い得株）":
+        if rsi < 30: score += 30 # 超売られすぎ（大バーゲン）に大ボーナス
+        elif rsi < 40: score += 15 # やや売られすぎも加点
+        elif rsi > 60: score -= 20 # すでに上がっている株は買わない
+
+    elif strategy == "⚖️ 王道バランス（業績が良くて普通の株）":
+        if 40 <= rsi <= 60: score += 20 # 安定飛行している株を加点
+        if rsi > 70 or rsi < 30: score -= 10 # 極端に上がったり下がったりしている株は避ける
+        if eps > 0 and 0 < per < 15: score += 20 # 業績と安さをさらに手厚く評価
+
     return score
 
-filtered_df['総合スコア'] = filtered_df.apply(calculate_score, axis=1)
+# AIが採点した結果を「あなたへのオススメ度」として記録
+filtered_df['あなたへのオススメ度'] = filtered_df.apply(calculate_score, axis=1)
 
-# 表示用の整形
-filtered_df = filtered_df.sort_values(by='総合スコア', ascending=False)
+# 表示用の整形（点数が高い順に並び替え）
+filtered_df = filtered_df.sort_values(by='あなたへのオススメ度', ascending=False)
 filtered_df['順位'] = range(1, len(filtered_df) + 1)
 filtered_df['株価'] = filtered_df['株価'].apply(lambda x: f"${x:.2f}")
 
-# RSIの状態を日本語でわかりやすく
+# 専門用語（RSI）を、誰でもわかる日本語に変換
 def rsi_status(rsi):
-    if rsi < 30: return "🔥超・売られすぎ"
-    elif rsi < 40: return "🟢買い場"
-    elif rsi > 70: return "⚠️買われすぎ(危険)"
-    else: return "⚪️中立"
+    if rsi < 30: return "🧊底値圏(大バーゲン)"
+    elif rsi < 40: return "📉下落中(お買い得)"
+    elif rsi < 60: return "⚪️安定"
+    elif rsi < 70: return "📈上昇中(人気上昇)"
+    else: return "🔥過熱(高値掴み注意)"
 
-filtered_df['RSI(過熱感)'] = filtered_df['RSI'].apply(rsi_status)
+filtered_df['今の状態'] = filtered_df['RSI'].apply(rsi_status)
 
-# 表示する列の絞り込み
-display_df = filtered_df[['順位', '銘柄', '記号', '総合スコア', '株価', 'PER', 'EPS', 'RSI(過熱感)']]
+# 見やすいように、必要な列だけを抜き出して表示
+display_df = filtered_df[['順位', '銘柄', 'あなたへのオススメ度', '今の状態', '株価', 'PER']]
 
-st.success("最新データの分析が完了しました！")
 st.dataframe(display_df.set_index('順位'), use_container_width=True)
