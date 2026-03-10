@@ -4,6 +4,10 @@ on:
     - cron: '30 14,22 * * *'
   workflow_dispatch:
 
+# ロボットにCSVファイルの保存（書き込み）を許可する魔法のブロック
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
