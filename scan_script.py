@@ -3,61 +3,59 @@ import yfinance as yf
 from textblob import TextBlob
 import time
 import requests
-from datetime import datetime
-import pytz
 
-def run_scan():
-    # 銘柄リスト取得
-    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    resp = requests.get(url, headers=headers)
-    all_tickers = [t.replace('.', '-') for t in pd.read_html(resp.text)[0]['Symbol'].tolist()]
-    
-    results = []
-    for ticker in all_tickers:
-        try:
-            s = yf.Ticker(ticker)
-            i = s.info
-            p = i.get('currentPrice', 0)
-            if p == 0 or p > 200: continue # 予算200ドル以内
+print("S&P500の生データ取得を開始します...")
 
-            # スコア計算
-            score = 0
-            # 1. ファンダメンタル(最大60点)
-            if i.get('trailingPE', 100) < 20: score += 20
-            if i.get('returnOnEquity', 0) > 0.18: score += 20
-            if i.get('profitMargins', 0) > 0.15: score += 20
+url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+headers = {"User-Agent": "Mozilla/5.0"}
+resp = requests.get(url, headers=headers)
+all_tickers = [t.replace('.', '-') for t in pd.read_html(resp.text)[0]['Symbol'].tolist()]
+
+raw_data = []
+
+for ticker in all_tickers:
+    try:
+        s = yf.Ticker(ticker)
+        info = s.info
+        price = info.get('currentPrice', 0)
+        
+        # 最低限の価格がないものはスキップ
+        if not price or price == 0:
+            continue
             
-            # 2. AI感情分析(最大20点)
-            news = s.news
-            sent = 0
-            if news:
-                s_list = [TextBlob(n['title']).sentiment.polarity for n in news[:5]]
-                sent = sum(s_list) / len(s_list)
-                score += (sent * 50) # -25〜+25点の幅
+        per = info.get('trailingPE', 0)
+        roe = info.get('returnOnEquity', 0)
+        margin = info.get('profitMargins', 0)
+        div = info.get('dividendYield', 0)
+        ma50 = info.get('fiftyDayAverage', 0)
+        
+        # AI感情分析（ニュースタイトル）
+        news = s.news
+        sentiment_val = 0
+        if news:
+            s_scores = [TextBlob(n['title']).sentiment.polarity for n in news[:5]]
+            if len(s_scores) > 0:
+                sentiment_val = sum(s_scores) / len(s_scores)
 
-            # 3. 高値掴みガード(最大20点)
-            ma50 = i.get('fiftyDayAverage')
-            dev = 0
-            if ma50:
-                dev = (p - ma50) / ma50
-                if dev > 0.15: score -= 30 # 過熱は大幅減点
-                elif dev < 0.05: score += 20 # 押し目は加点
+        raw_data.append({
+            '記号': ticker,
+            '銘柄': info.get('shortName', ticker),
+            '株価': price,
+            'PER': per if per else 0,
+            'ROE': roe if roe else 0,
+            '利益率': margin if margin else 0,
+            '配当利回り': div if div else 0,
+            'MA50': ma50 if ma50 else 0,
+            'AI感情': sentiment_val
+        })
+        print(f"取得成功: {ticker}")
+        time.sleep(0.5) # ブロック回避のための丁寧な待機
+        
+    except Exception as e:
+        print(f"取得エラー {ticker}: {e}")
+        continue
 
-            results.append({
-                '銘柄': i.get('shortName', ticker), '記号': ticker, 'スコア': round(score, 1),
-                '株価': f"${p:.2f}", 'AI判断': "😊" if sent > 0.1 else "😨" if sent < -0.1 else "😐",
-                'ROE%': round(i.get('returnOnEquity', 0)*100, 1), '過熱度%': round(dev*100, 1)
-            })
-            time.sleep(0.1)
-        except: continue
-
-    df = pd.DataFrame(results).sort_values('スコア', ascending=False)
-    df['順位'] = range(1, len(df) + 1)
-    # 日本時間の更新時間を記録
-    jst = pytz.timezone('Asia/Tokyo')
-    df['更新日'] = datetime.now(jst).strftime('%Y/%m/%d %H:%M')
-    df.to_csv('sp500_ranking.csv', index=False)
-
-if __name__ == "__main__":
-    run_scan()
+# 生データをCSVとして保存
+df = pd.DataFrame(raw_data)
+df.to_csv('raw_stock_data.csv', index=False)
+print("データ取得完了、CSVを保存しました。")
