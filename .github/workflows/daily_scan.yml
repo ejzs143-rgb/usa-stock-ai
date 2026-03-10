@@ -1,14 +1,12 @@
 name: Daily Stock Scan
 on:
   schedule:
-    - cron: '30 14,22 * * *' # 日本時間 23:30 と 07:00 に実行
-  workflow_dispatch: # 手動実行用ボタン
+    - cron: '30 14,22 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v3
       - name: Set up Python
@@ -16,13 +14,16 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install dependencies
-        run: pip install pandas yfinance textblob requests lxml pytz
+        run: |
+          pip install pandas yfinance requests numpy
       - name: Run scan
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
         run: python scan_script.py
       - name: Commit results
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add sp500_ranking.csv
-          git commit -m "Update ranking" || exit 0
+          git add raw_stock_data.csv
+          git commit -m "Update stock data" || exit 0
           git push
