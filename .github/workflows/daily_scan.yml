@@ -15,7 +15,7 @@ jobs:
           python-version: '3.10'
       - name: Install dependencies
         run: |
-          pip install pandas yfinance requests numpy
+          pip install pandas yfinance requests numpy lxml
       - name: Run scan
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
