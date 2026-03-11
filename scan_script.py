@@ -2,10 +2,16 @@ import pandas as pd
 import yfinance as yf
 import numpy as np
 import time
+import requests # 【追加】人間を装うための通信ライブラリ
 
-# S&P500の銘柄を取得
+# S&P500の銘柄を取得（Wikipediaのブロック回避版）
 url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-df_tickers = pd.read_html(url)[0]
+# 【追加】「私はWindowsのChromeブラウザから見ている人間ですよ」という偽装パスポート
+headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+
+# 偽装パスポートを使ってWikipediaにアクセス
+response = requests.get(url, headers=headers)
+df_tickers = pd.read_html(response.text)[0]
 tickers = df_tickers['Symbol'].str.replace('.', '-').tolist()
 
 data = []
@@ -19,12 +25,12 @@ for ticker in tickers:
         price = hist['Close'].iloc[-1]
         eps = info.get('trailingEps', 0)
         per = info.get('trailingPE', 0)
-        f_per = info.get('forwardPE', 0) # 【追加】予想PER
+        f_per = info.get('forwardPE', 0)
         roe = info.get('returnOnEquity', 0)
         margin = info.get('profitMargins', 0)
         div = info.get('dividendYield', 0)
-        pbr = info.get('priceToBook', 0) # 【追加】実績PBR
-        roa = info.get('returnOnAssets', 0) # 【追加】実績ROA
+        pbr = info.get('priceToBook', 0)
+        roa = info.get('returnOnAssets', 0)
         
         # RSI計算
         delta = hist['Close'].diff()
