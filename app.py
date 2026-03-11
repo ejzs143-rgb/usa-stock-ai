@@ -53,7 +53,6 @@ if search_query:
         filtered_df['銘柄'].str.contains(search_query, case=False, na=False)
     ]
 
-# 点数を「1つの文章」ではなく、「個別のデータ」としてバラバラに返すように改造！
 def calculate_scores(row):
     score_eps = 10 if row['EPS'] > 0 else -50
     
@@ -102,15 +101,12 @@ def calculate_scores(row):
 
     total_score = score_eps + score_per + score_roe + score_margin + score_div + score_strat
     
-    # バラバラの点数として出力
     return pd.Series([total_score, f"{score_strat}/30", f"{score_eps}/10", f"{score_per}/15", f"{score_roe}/15", f"{score_margin}/15", f"{score_div}/15"])
 
-# バラバラにした点数を表の新しい列として追加
 filtered_df[['💯総合スコア', '戦略点', 'EPS点', '割安点', 'ROE点', '利益率点', '配当点']] = filtered_df.apply(calculate_scores, axis=1)
 filtered_df = filtered_df.sort_values(by='💯総合スコア', ascending=False)
 filtered_df['順位'] = range(1, len(filtered_df) + 1)
 
-# 表示項目の整形
 filtered_df['株価'] = filtered_df['株価'].apply(lambda x: f"${x:.2f}")
 filtered_df['EPS'] = filtered_df['EPS'].apply(lambda x: f"${x:.2f}")
 filtered_df['MA50'] = filtered_df['MA50'].apply(lambda x: f"${x:.2f}")
@@ -130,7 +126,6 @@ def rsi_status(rsi):
 
 filtered_df['今の株価の勢い'] = filtered_df['RSI'].apply(rsi_status)
 
-# 各指標と点数を「交互に隣同士」になるように並べ替え！
 display_df = filtered_df[[
     '順位', '記号', '銘柄', '💯総合スコア', 
     '戦略点', '今の株価の勢い', '株価', 'MA50',
@@ -142,19 +137,19 @@ display_df = filtered_df[[
     '予想PER', 'PBR', 'ROA%'
 ]]
 
-# ヘッダー名に「┃」を入れて、明確なブロックの壁を作る
+# 【修正箇所】システムが混乱しないよう、点数の列名をそれぞれ独立させました！
 display_df = display_df.rename(columns={
     '戦略点': '┃戦略合致点(/30)',
     'EPS': '┃EPS(1株の利益)',
-    'EPS点': '点数(/10)',
+    'EPS点': 'EPS点(/10)',
     'PER': '┃PER(実績の割安さ)',
-    '割安点': '点数(/15)',
+    '割安点': '割安点(/15)',
     'ROE%': '┃ROE(稼ぐ力)',
-    'ROE点': '点数(/15)',
+    'ROE点': 'ROE点(/15)',
     '利益率%': '┃利益率(儲かりやすさ)',
-    '利益率点': '点数(/15)',
+    '利益率点': '利益率点(/15)',
     '配当%': '┃配当(もらえる現金)',
-    '配当点': '点数(/15)',
+    '配当点': '配当点(/15)',
     '予想PER': '┃予想PER(来年の割安さ)',
     'PBR': '┃PBR(解散価値)',
     'ROA%': '┃ROA(総資産の稼ぐ力)'
