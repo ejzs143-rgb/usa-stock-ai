@@ -117,7 +117,6 @@ def calculate_scores(row):
         str_rsi, str_trend, str_bonus, str_f_per, str_pbr, str_roa
     ])
 
-# 計算したバラバラの点数をデータフレームに合体
 filtered_df[['💯総合スコア', 'EPS点', '割安点', 'ROE点', '利益率点', '配当点', 'RSI点', 'トレンド点', '王道ボーナス', '予想PER点', 'PBR点', 'ROA点']] = filtered_df.apply(calculate_scores, axis=1)
 filtered_df = filtered_df.sort_values(by='💯総合スコア', ascending=False)
 filtered_df['順位'] = range(1, len(filtered_df) + 1)
@@ -158,29 +157,29 @@ display_df = filtered_df[[
     'ROA%', 'ROA点'
 ]]
 
-# ヘッダー名に「┃」を入れて、明確なブロックの壁を作る
+# 【修正箇所】名前が一切重複しないように、すべて個別の名前を振りました
 display_df = display_df.rename(columns={
     'EPS': '┃EPS(1株の利益)',
-    'EPS点': '点数(/10)',
+    'EPS点': 'EPS点(/10)',
     'PER': '┃PER(実績の割安さ)',
-    '割安点': '点数(/15)',
+    '割安点': '割安点(/15)',
     'ROE%': '┃ROE(稼ぐ力)',
-    'ROE点': '点数(/15)',
+    'ROE点': 'ROE点(/15)',
     '利益率%': '┃利益率(儲かりやすさ)',
-    '利益率点': '点数(/15)',
+    '利益率点': '利益率点(/15)',
     '配当%': '┃配当(もらえる現金)',
-    '配当点': '点数(/15)',
+    '配当点': '配当点(/15)',
     '今の株価の勢い': '┃RSI(株価の過熱感)',
-    'RSI点': 'RSI点',
+    'RSI点': 'RSI点(/20)',
     'MA50': '50日平均線(MA50)',
-    'トレンド点': 'トレンド点',
+    'トレンド点': 'トレンド点(/10)',
     '王道ボーナス': '┃業績ボーナス加点',
     '予想PER': '┃予想PER(来年の割安さ)',
-    '予想PER点': '予想PER点',
+    '予想PER点': '予想PER点(/10)',
     'PBR': '┃PBR(解散価値)',
-    'PBR点': 'PBR点',
+    'PBR点': 'PBR点(/10)',
     'ROA%': '┃ROA(総資産の稼ぐ力)',
-    'ROA点': 'ROA点'
+    'ROA点': 'ROA点(/10)'
 })
 
 if search_query and display_df.empty:
