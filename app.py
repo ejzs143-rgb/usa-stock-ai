@@ -5,7 +5,7 @@ import datetime
 
 st.set_page_config(page_title="米国株 フルスペックAI格付け", layout="wide")
 st.title("📱 米国株 自分専用リモコン (フルスペック版)")
-st.write("裏側の8軸を一切ごまかさず全出し！横にスクロールしてすべての採点内訳と指標データを確認できます。")
+st.write("100点満点のスコア形式！各指標が「何点満点中、何点か」をすべて透明化しました。")
 
 # データ読み込み
 file_path = 'raw_stock_data.csv'
@@ -48,64 +48,65 @@ if search_query:
         filtered_df['銘柄'].str.contains(search_query, case=False, na=False)
     ]
 
-# 8軸を一切まとめず、独立して計算・表示するエンジン
+# 100点満点形式の計算エンジン
 def calculate_score_and_breakdown(row):
-    # 1. EPS(黒字)
-    score_eps = 20 if row['EPS'] > 0 else -50
-    # 2. PER(割安)
+    # 1. EPS(黒字) [10点満点]
+    score_eps = 10 if row['EPS'] > 0 else -50
+    
+    # 2. PER(割安) [15点満点]
     score_per = 0
-    if 0 < row['PER'] < 15: score_per = 20
-    elif 15 <= row['PER'] < 25: score_per = 10
-    # 3. ROE
+    if 0 < row['PER'] < 15: score_per = 15
+    elif 15 <= row['PER'] < 25: score_per = 8
+    
+    # 3. ROE [15点満点]
     score_roe = 0
-    if row['ROE'] > 0.20: score_roe = 20
-    elif row['ROE'] > 0.10: score_roe = 10
-    # 4. 利益率
+    if row['ROE'] > 0.20: score_roe = 15
+    elif row['ROE'] > 0.10: score_roe = 8
+    
+    # 4. 利益率 [15点満点]
     score_margin = 0
-    if row['利益率'] > 0.20: score_margin = 20
-    elif row['利益率'] > 0.10: score_margin = 10
-    # 5. 配当
+    if row['利益率'] > 0.20: score_margin = 15
+    elif row['利益率'] > 0.10: score_margin = 8
+    
+    # 5. 配当 [15点満点]
     score_div = 0
     if row['配当利回り'] > 0.04: score_div = 15
-    elif row['配当利回り'] > 0.02: score_div = 5
+    elif row['配当利回り'] > 0.02: score_div = 8
 
-    # 6. RSI(過熱感) と 7. トレンド(MA50) の独立計算
-    score_rsi = 0
-    score_trend = 0
+    # 6. 戦略合致度 [30点満点]
+    score_strat = 0
     rsi = row['RSI']
     price = row['株価']
     ma50 = row['MA50']
     
     if strategy == "📈 勢いに乗る（みんなが買ってる人気株）":
-        if 50 <= rsi <= 70: score_rsi = 30 
-        elif rsi > 75: score_rsi = -30 
-        elif rsi < 40: score_rsi = -20 
-        if price > ma50 * 1.05: score_trend = 15 
+        if 50 <= rsi <= 70: score_strat += 20 
+        elif rsi > 75: score_strat -= 20 
+        elif rsi < 40: score_strat -= 10 
+        if price > ma50 * 1.05: score_strat += 10 
 
     elif strategy == "📉 暴落を拾う（パニックで売られたお買い得株）":
-        if rsi < 30: score_rsi = 30 
-        elif rsi < 40: score_rsi = 15 
-        elif rsi > 60: score_rsi = -20 
-        if price < ma50 * 0.90: score_trend = 15 
+        if rsi < 30: score_strat += 20 
+        elif rsi < 40: score_strat += 10 
+        elif rsi > 60: score_strat -= 10 
+        if price < ma50 * 0.90: score_strat += 10 
 
     elif strategy == "⚖️ 王道バランス（業績が良くて普通の株）":
-        if 40 <= rsi <= 60: score_rsi = 20 
-        if rsi > 70 or rsi < 30: score_rsi = -10 
-        # 王道は業績の相乗効果をトレンド点の代わりに加点
-        if row['ROE'] > 0.15 and row['利益率'] > 0.15: score_trend = 20 
+        if 40 <= rsi <= 60: score_strat += 15 
+        if rsi > 70 or rsi < 30: score_strat -= 10 
+        if row['ROE'] > 0.15 and row['利益率'] > 0.15: score_strat += 15 
 
-    total_score = score_eps + score_per + score_roe + score_margin + score_div + score_rsi + score_trend
+    total_score = score_eps + score_per + score_roe + score_margin + score_div + score_strat
     
-    # 8軸すべてを明記した究極の内訳
-    breakdown = f"黒字:{score_eps} 割安:{score_per} ROE:{score_roe} 利益率:{score_margin} 配当:{score_div} RSI:{score_rsi} ﾄﾚﾝﾄﾞ等:{score_trend}"
+    # 内訳を「獲得点/満点」の表記に変更！
+    breakdown = f"黒字:{score_eps}/10 割安:{score_per}/15 ROE:{score_roe}/15 利益率:{score_margin}/15 配当:{score_div}/15 戦略:{score_strat}/30"
     
     return pd.Series([total_score, breakdown])
 
-filtered_df[['オススメ度(点数)', '採点内訳(横スクロール)']] = filtered_df.apply(calculate_score_and_breakdown, axis=1)
-filtered_df = filtered_df.sort_values(by='オススメ度(点数)', ascending=False)
+filtered_df[['総合スコア(100点満点)', '採点内訳(横スクロール)']] = filtered_df.apply(calculate_score_and_breakdown, axis=1)
+filtered_df = filtered_df.sort_values(by='総合スコア(100点満点)', ascending=False)
 filtered_df['順位'] = range(1, len(filtered_df) + 1)
 
-# 指標のフォーマット整形（MA50も追加）
 filtered_df['株価'] = filtered_df['株価'].apply(lambda x: f"${x:.2f}")
 filtered_df['EPS'] = filtered_df['EPS'].apply(lambda x: f"${x:.2f}")
 filtered_df['MA50'] = filtered_df['MA50'].apply(lambda x: f"${x:.2f}")
@@ -122,8 +123,8 @@ def rsi_status(rsi):
 
 filtered_df['今の株価の勢い'] = filtered_df['RSI'].apply(rsi_status)
 
-# MA50（50日平均線）を含め、全データを表示列にセット！
-display_df = filtered_df[['順位', '記号', '銘柄', 'オススメ度(点数)', '採点内訳(横スクロール)', '今の株価の勢い', '株価', 'MA50', 'PER', 'EPS', 'ROE%', '利益率%', '配当%']]
+# 総合スコアと内訳を配置
+display_df = filtered_df[['順位', '記号', '銘柄', '総合スコア(100点満点)', '採点内訳(横スクロール)', '今の株価の勢い', '株価', 'MA50', 'PER', 'EPS', 'ROE%', '利益率%', '配当%']]
 
 display_df = display_df.rename(columns={
     'MA50': 'MA50(50日平均線)',
