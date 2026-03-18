@@ -1,6 +1,7 @@
-streamlit
 pandas
 yfinance
-textblob
 requests
+numpy
 lxml
+yahooquery
+plotly
