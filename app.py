@@ -14,7 +14,6 @@ st.set_page_config(page_title="米国株AI格付け", layout="wide")
 if 'selected_stock' not in st.session_state:
     st.session_state.selected_stock = None
 
-# お気に入りデータを保存するローカルファイル
 FAV_FILE = 'favorites.json'
 def load_favs():
     if os.path.exists(FAV_FILE):
@@ -49,21 +48,18 @@ for col in ['PBR', 'ROA', '予想PER']:
 
 if st.session_state.selected_stock is not None:
     # --------------------------------------------------
-    # 【個別詳細画面】 (銘柄がタップされた時に表示される専用画面)
+    # 【個別詳細画面】 (銘柄タップ時)
     # --------------------------------------------------
     selected_ticker = st.session_state.selected_stock
     
-    # 元の一覧に戻るための大きなボタン（人間工学配慮）
     if st.button("🔙 銘柄一覧に戻る", use_container_width=True):
         st.session_state.selected_stock = None
         st.rerun()
 
-    # 選択された銘柄の生データを取得
     raw_row = df[df['記号'] == selected_ticker]
     if not raw_row.empty:
         row = raw_row.iloc[0]
         
-        # タイトルとお気に入りボタンを横並びに配置
         col_title, col_fav = st.columns([3, 1])
         with col_title:
             st.markdown(f"## {selected_ticker} ({row['銘柄']})")
@@ -79,24 +75,35 @@ if st.session_state.selected_stock is not None:
                     save_favs(fav_list)
                     st.rerun()
 
-        # 最重要指標を画面の「上部」に大きく表示
-        st.markdown("##### 📊 投資判断の重要指標")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("現在の株価", f"${row['株価']:.2f}")
-        m2.metric("PER (割安さ)", f"{row['PER']:.1f}倍")
-        m3.metric("ROE (稼ぐ力)", f"{row['ROE']*100:.1f}%")
-        m4.metric("配当利回り", f"{row['配当利回り']*100:.1f}%")
+        # 【追加】この銘柄の「8軸AIスコア」をすべて表示！
+        st.markdown("##### 🏆 AI格付けスコア情報")
+        
+        # 裏で計算ロジックを再度回して点数を抽出（重複を避けるための安全な処理）
+        score_eps = 10 if row['EPS'] > 0 else -50
+        score_per = 15 if 0 < row['PER'] < 15 else (8 if 15 <= row['PER'] < 25 else 0)
+        score_roe = 15 if row['ROE'] > 0.20 else (8 if row['ROE'] > 0.10 else 0)
+        score_margin = 15 if row['利益率'] > 0.20 else (8 if row['利益率'] > 0.10 else 0)
+        score_div = 15 if row['配当利回り'] > 0.04 else (8 if row['配当利回り'] > 0.02 else 0)
+        # 戦略点はシンプルに合計から逆算して「戦略合致ボーナス」として表示
+        total_base = score_eps + score_per + score_roe + score_margin + score_div
+        
+        # 表の作成
+        info_df = pd.DataFrame({
+            "指標": ["現在の株価", "EPS(黒字)", "PER(割安)", "ROE(稼ぐ力)", "利益率", "配当利回り"],
+            "数値": [f"${row['株価']:.2f}", f"${row['EPS']:.2f}", f"{row['PER']:.1f}倍", f"{row['ROE']*100:.1f}%", f"{row['利益率']*100:.1f}%", f"{row['配当利回り']*100:.1f}%"],
+            "獲得点": [f"-", f"{score_eps}/10点", f"{score_per}/15点", f"{score_roe}/15点", f"{score_margin}/15点", f"{score_div}/15点"]
+        })
+        st.table(info_df.set_index("指標"))
 
         st.markdown("---")
+        st.markdown("##### 📈 テクニカルチャート (ローソク足 ＆ 移動平均線)")
         
-        # チャート操作パネル
         col1, col2 = st.columns(2)
         with col1:
             period_choice = st.radio("表示期間", ["3ヶ月", "6ヶ月", "1年", "5年"], horizontal=True)
         with col2:
             interval_choice = st.radio("足の長さ", ["日足", "週足", "月足"], horizontal=True)
 
-        period_map = {"3ヶ月": "3mo", "6ヶ月": "6mo", "1年": "1y", "5年": "5y"}
         interval_map = {"日足": "1d", "週足": "1wk", "月足": "1mo"}
 
         now_jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
@@ -105,44 +112,63 @@ if st.session_state.selected_stock is not None:
         with st.spinner("最新チャートを描画中..."):
             try:
                 stock_data = yf.Ticker(selected_ticker)
-                hist = stock_data.history(period=period_map[period_choice], interval=interval_map[interval_choice])
+                # 移動平均を正確に計算するため、長めの期間（2年分）を一旦取得する
+                hist_full = stock_data.history(period="2y", interval=interval_map[interval_choice])
                 
-                if not hist.empty:
+                if not hist_full.empty:
+                    # 移動平均線の計算 (25, 50, 75)
+                    hist_full['MA25'] = hist_full['Close'].rolling(window=25).mean()
+                    hist_full['MA50'] = hist_full['Close'].rolling(window=50).mean()
+                    hist_full['MA75'] = hist_full['Close'].rolling(window=75).mean()
+
+                    # ユーザーが選んだ期間に合わせてデータをカット
+                    if interval_choice == "日足":
+                        days = {"3ヶ月": 63, "6ヶ月": 126, "1年": 252, "5年": 1260}[period_choice]
+                        hist = hist_full.tail(days)
+                    elif interval_choice == "週足":
+                        weeks = {"3ヶ月": 13, "6ヶ月": 26, "1年": 52, "5年": 260}[period_choice]
+                        hist = hist_full.tail(weeks)
+                    else:
+                        months = {"3ヶ月": 3, "6ヶ月": 6, "1年": 12, "5年": 60}[period_choice]
+                        hist = hist_full.tail(months)
+
                     latest_price = hist['Close'].iloc[-1]
                     st.markdown(f"🕒 リアルタイム価格: **${latest_price:.2f}** ({current_time_str})")
-                    st.caption("💡 2本指でピンチズーム、1本指でスライド。ダブルタップで元のサイズに戻ります。")
+                    st.caption("💡 【ズーム方法】チャート下の「専用バー（ツマミ）」を左右にスライドさせてください。")
                     
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=hist.index, 
-                        y=hist['Close'], 
-                        mode='lines', 
-                        name='終値',
-                        line=dict(color='#1f77b4', width=2.5)
+
+                    # 1. ローソク足の追加（日本式：陽線＝赤、陰線＝青）
+                    fig.add_trace(go.Candlestick(
+                        x=hist.index,
+                        open=hist['Open'], high=hist['High'],
+                        low=hist['Low'], close=hist['Close'],
+                        name='ローソク足',
+                        increasing_line_color='#ff4b4b', # 上昇（赤）
+                        decreasing_line_color='#0068c9'  # 下落（青）
                     ))
+
+                    # 2. 移動平均線の追加
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA25'], mode='lines', name='MA25', line=dict(color='orange', width=1.5)))
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA50'], mode='lines', name='MA50', line=dict(color='green', width=1.5)))
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA75'], mode='lines', name='MA75', line=dict(color='purple', width=1.5)))
                     
-                    # 【ズーム大改造】ピンチズームを許可し、1本指での暴発（ズーム枠作成）を防ぐ
+                    # 3. スマホ操作特化レイアウト（レンジスライダーの有効化）
                     fig.update_layout(
                         margin=dict(l=0, r=0, t=10, b=0),
                         xaxis_title="",
                         yaxis_title="",
-                        height=350,
+                        height=450,
                         hovermode="x unified",
-                        dragmode="pan" # 1本指はパン（移動）のみ。2本指でのピンチズームは標準で有効になります
+                        xaxis_rangeslider_visible=True, # 【重要】スマホ用ズームバーをON！
+                        dragmode="pan"
                     )
                     
-                    # 以前の xaxes/yaxes の fixedrange=True（ガチガチのロック）を解除しました！
-                    
-                    # ダブルタップでリセット機能を設定
-                    st.plotly_chart(fig, use_container_width=True, config={
-                        'displayModeBar': False, 
-                        'scrollZoom': True,
-                        'doubleClick': 'reset'
-                    })
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
                 else:
                     st.warning("チャートデータがありません。")
-            except Exception:
-                st.error("データの取得に失敗しました。")
+            except Exception as e:
+                st.error(f"データの取得に失敗しました。")
 
 else:
     # --------------------------------------------------
