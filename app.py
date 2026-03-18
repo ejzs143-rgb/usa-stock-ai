@@ -65,7 +65,6 @@ strategy = st.sidebar.radio(
 st.sidebar.markdown("---")
 st.sidebar.markdown("**🔄 データの最新化**")
 
-# 【新機能】アプリ内での手動リアルタイム更新ボタン！
 if st.sidebar.button("最新ランキングを取得 (約1〜2分)", use_container_width=True):
     progress_bar = st.sidebar.progress(0)
     status_text = st.sidebar.empty()
@@ -106,7 +105,6 @@ if st.sidebar.button("最新ランキングを取得 (約1〜2分)", use_contain
         except Exception:
             pass
         
-        # 進捗状況を更新
         if i % 10 == 0 or i == total - 1:
             progress_bar.progress((i + 1) / total)
             status_text.text(f"データ取得中... {i+1} / {total}社完了")
@@ -191,7 +189,6 @@ if st.session_state.selected_stock is not None:
                 hist_full = stock_data.history(period="10y", interval=interval_map[interval_choice])
                 
                 if not hist_full.empty:
-                    # 【大改造】日本人に馴染み深い MA5(短期), MA25(中期), MA75(長期) に設定！
                     hist_full['MA5'] = hist_full['Close'].rolling(window=5).mean()
                     hist_full['MA25'] = hist_full['Close'].rolling(window=25).mean()
                     hist_full['MA75'] = hist_full['Close'].rolling(window=75).mean()
@@ -215,10 +212,11 @@ if st.session_state.selected_stock is not None:
                         x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'],
                         name='ローソク足', increasing_line_color='#ff4b4b', decreasing_line_color='#0068c9'
                     ))
-                    # 移動平均線を新しい設定で描画
-                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA5'], mode='lines', name='MA5(短期)', line=dict(color='#e377c2', width=1.5)))
+                    
+                    # 【変更箇所】MA線の色をご指定の「黄・緑・白」に変更しました！
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA5'], mode='lines', name='MA5(短期)', line=dict(color='yellow', width=1.5)))
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['MA25'], mode='lines', name='MA25(中期)', line=dict(color='#2ca02c', width=1.5)))
-                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA75'], mode='lines', name='MA75(長期)', line=dict(color='#ff7f0e', width=1.5)))
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA75'], mode='lines', name='MA75(長期)', line=dict(color='white', width=1.5)))
                     
                     fig.update_layout(
                         margin=dict(l=0, r=0, t=10, b=0),
