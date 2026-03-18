@@ -5,9 +5,13 @@ import json
 import datetime
 import yfinance as yf
 import plotly.graph_objects as go
+import time
 
 st.set_page_config(page_title="米国株AI格付け", layout="wide")
 
+# ==========================================
+# 1. 状態管理（リセット防止のセッション管理）
+# ==========================================
 if 'selected_stock' not in st.session_state:
     st.session_state.selected_stock = None
 
@@ -24,6 +28,9 @@ def save_favs(favs):
 
 fav_list = load_favs()
 
+# ==========================================
+# 2. データ読み込み
+# ==========================================
 file_path = 'raw_stock_data.csv'
 if not os.path.exists(file_path):
     st.warning("現在データを収集中です。数分後にリロードしてください。")
@@ -36,8 +43,96 @@ for col in ['PBR', 'ROA', '予想PER']:
     if col not in df.columns:
         df[col] = 0
 
+# ==========================================
+# 3. グローバルサイドバー（画面移動しても状態を絶対キープする）
+# ==========================================
+st.sidebar.markdown("**🔍 銘柄検索**")
+search_query = st.sidebar.text_input("記号・名前", "", key="search_q", label_visibility="collapsed", placeholder="例: AAPL")
+
+st.sidebar.markdown("---")
+show_only_favs = st.sidebar.checkbox("⭐ お気に入り銘柄のみ表示", value=False, key="fav_check")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("**🕹️ 戦略設定**")
+max_p = st.sidebar.slider("予算上限 ($)", 10, 500, 150, key="budget")
+strategy = st.sidebar.radio(
+    "判定ロジック", 
+    ["📈 勢いに乗る (モメンタム)", "📉 暴落を拾う (逆張り)", "⚖️ 王道バランス (業績重視)", "🏛️ 伝統的割安 (バフェット流)"],
+    label_visibility="collapsed",
+    key="strat"
+)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("**🔄 データの最新化**")
+
+# 【新機能】アプリ内での手動リアルタイム更新ボタン！
+if st.sidebar.button("最新ランキングを取得 (約1〜2分)", use_container_width=True):
+    progress_bar = st.sidebar.progress(0)
+    status_text = st.sidebar.empty()
+    
+    tickers = df['記号'].tolist()
+    updated_data = []
+    total = len(tickers)
+    
+    for i, ticker in enumerate(tickers):
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            hist = stock.history(period="6mo")
+            if not hist.empty:
+                price = hist['Close'].iloc[-1]
+                eps = info.get('trailingEps', 0)
+                per = info.get('trailingPE', 0)
+                f_per = info.get('forwardPE', 0)
+                roe = info.get('returnOnEquity', 0)
+                margin = info.get('profitMargins', 0)
+                div = info.get('dividendYield', 0)
+                pbr = info.get('priceToBook', 0)
+                roa = info.get('returnOnAssets', 0)
+                
+                delta = hist['Close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                rsi = 100 - (100 / (1 + rs.iloc[-1])) if not pd.isna(rs.iloc[-1]) else 50
+                ma50 = hist['Close'].rolling(window=50).mean().iloc[-1]
+                
+                updated_data.append({
+                    '記号': ticker, '銘柄': info.get('shortName', ticker), '株価': price,
+                    'PER': per or 0, '予想PER': f_per or 0, 'EPS': eps or 0,
+                    'ROE': roe or 0, '利益率': margin or 0, '配当利回り': div or 0,
+                    'PBR': pbr or 0, 'ROA': roa or 0, 'RSI': rsi, 'MA50': ma50
+                })
+        except Exception:
+            pass
+        
+        # 進捗状況を更新
+        if i % 10 == 0 or i == total - 1:
+            progress_bar.progress((i + 1) / total)
+            status_text.text(f"データ取得中... {i+1} / {total}社完了")
+            
+    if updated_data:
+        new_df = pd.DataFrame(updated_data)
+        new_df.fillna(0, inplace=True)
+        new_df.to_csv(file_path, index=False)
+        status_text.text("✅ 更新完了！画面を再読み込みします...")
+        time.sleep(1.5)
+        st.rerun()
+
+timestamp = os.path.getmtime(file_path)
+utc_time = datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc)
+jst_time = utc_time.astimezone(datetime.timezone(datetime.timedelta(hours=9)))
+st.sidebar.caption(f"最終取得: {jst_time.strftime('%Y/%m/%d %H:%M')}")
+
+
+# ==========================================
+# 4. 画面ルーティング
+# ==========================================
+
 if st.session_state.selected_stock is not None:
-    # --- 個別詳細画面 ---
+    # --------------------------------------------------
+    # 【個別詳細画面】
+    # --------------------------------------------------
     selected_ticker = st.session_state.selected_stock
     
     if st.button("🔙 銘柄一覧に戻る", use_container_width=True):
@@ -78,13 +173,13 @@ if st.session_state.selected_stock is not None:
         st.table(info_df.set_index("指標"))
 
         st.markdown("---")
-        st.markdown("##### 📈 テクニカルチャート (ローソク足 ＆ 移動平均線)")
+        st.markdown("##### 📈 テクニカルチャート")
         
         col1, col2 = st.columns(2)
         with col1:
-            period_choice = st.radio("表示期間", ["3ヶ月", "6ヶ月", "1年", "5年"], horizontal=True)
+            period_choice = st.radio("表示期間", ["3ヶ月", "6ヶ月", "1年", "5年"], horizontal=True, key="p_choice")
         with col2:
-            interval_choice = st.radio("足の長さ", ["日足", "週足", "月足"], horizontal=True)
+            interval_choice = st.radio("足の長さ", ["日足", "週足", "月足"], horizontal=True, key="i_choice")
 
         interval_map = {"日足": "1d", "週足": "1wk", "月足": "1mo"}
         now_jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
@@ -93,12 +188,12 @@ if st.session_state.selected_stock is not None:
         with st.spinner("最新チャートを描画中..."):
             try:
                 stock_data = yf.Ticker(selected_ticker)
-                # 移動平均の計算不足を防ぐため、裏で10年分の生データを取得
                 hist_full = stock_data.history(period="10y", interval=interval_map[interval_choice])
                 
                 if not hist_full.empty:
+                    # 【大改造】日本人に馴染み深い MA5(短期), MA25(中期), MA75(長期) に設定！
+                    hist_full['MA5'] = hist_full['Close'].rolling(window=5).mean()
                     hist_full['MA25'] = hist_full['Close'].rolling(window=25).mean()
-                    hist_full['MA50'] = hist_full['Close'].rolling(window=50).mean()
                     hist_full['MA75'] = hist_full['Close'].rolling(window=75).mean()
 
                     if interval_choice == "日足":
@@ -120,15 +215,16 @@ if st.session_state.selected_stock is not None:
                         x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'],
                         name='ローソク足', increasing_line_color='#ff4b4b', decreasing_line_color='#0068c9'
                     ))
-                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA25'], mode='lines', name='MA25', line=dict(color='orange', width=1.5)))
-                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA50'], mode='lines', name='MA50', line=dict(color='green', width=1.5)))
-                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA75'], mode='lines', name='MA75', line=dict(color='purple', width=1.5)))
+                    # 移動平均線を新しい設定で描画
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA5'], mode='lines', name='MA5(短期)', line=dict(color='#e377c2', width=1.5)))
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA25'], mode='lines', name='MA25(中期)', line=dict(color='#2ca02c', width=1.5)))
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['MA75'], mode='lines', name='MA75(長期)', line=dict(color='#ff7f0e', width=1.5)))
                     
                     fig.update_layout(
                         margin=dict(l=0, r=0, t=10, b=0),
                         xaxis_title="", yaxis_title="", height=450,
                         hovermode="x unified",
-                        xaxis_rangeslider_visible=True, # ズームバー表示
+                        xaxis_rangeslider_visible=True,
                         dragmode="pan"
                     )
                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
@@ -138,20 +234,11 @@ if st.session_state.selected_stock is not None:
                 st.error("データの取得に失敗しました。")
 
 else:
-    # --- 一覧画面 ---
+    # --------------------------------------------------
+    # 【一覧画面】
+    # --------------------------------------------------
     st.subheader("🇺🇸 米国株AI格付け")
-    timestamp = os.path.getmtime(file_path)
-    utc_time = datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc)
-    jst_time = utc_time.astimezone(datetime.timezone(datetime.timedelta(hours=9)))
-    st.caption(f"最終データ更新: {jst_time.strftime('%Y/%m/%d %H:%M')}")
-
-    search_query = st.sidebar.text_input("🔍 銘柄検索 (例: AAPL)", "")
-    st.sidebar.markdown("---")
-    show_only_favs = st.sidebar.checkbox("⭐ お気に入り銘柄のみ表示", value=False)
-    st.sidebar.markdown("---")
-    max_p = st.sidebar.slider("予算上限 ($)", 10, 500, 150)
-    strategy = st.sidebar.radio("判定ロジック", ["📈 勢いに乗る (モメンタム)", "📉 暴落を拾う (逆張り)", "⚖️ 王道バランス (業績重視)", "🏛️ 伝統的割安 (バフェット流)"], label_visibility="collapsed")
-
+    
     filtered_df = df[df['株価'] <= max_p].copy()
     if search_query:
         filtered_df = filtered_df[filtered_df['記号'].str.contains(search_query.upper(), na=False) | filtered_df['銘柄'].str.contains(search_query, case=False, na=False)]
