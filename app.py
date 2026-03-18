@@ -10,7 +10,7 @@ import time
 st.set_page_config(page_title="米国株AI格付け", layout="wide")
 
 # ==========================================
-# 1. 状態管理（お気に入り ＆ 今回追加：前回設定の記憶）
+# 1. 状態管理（前回設定の記憶機能）
 # ==========================================
 if 'selected_stock' not in st.session_state:
     st.session_state.selected_stock = None
@@ -56,7 +56,7 @@ for col in ['PBR', 'ROA', '予想PER']:
     if col not in df.columns: df[col] = 0
 
 # ==========================================
-# 3. グローバルサイドバー（前回設定の自動読み込み＆保存）
+# 3. グローバルサイドバー
 # ==========================================
 st.sidebar.markdown("**🔍 銘柄検索**")
 search_query = st.sidebar.text_input("記号・名前", value=app_settings.get("search_query", ""), key="search_q", label_visibility="collapsed", placeholder="例: AAPL")
@@ -74,7 +74,6 @@ strat_idx = strategies.index(saved_strat) if saved_strat in strategies else 0
 
 strategy = st.sidebar.radio("判定ロジック", strategies, index=strat_idx, label_visibility="collapsed", key="strat")
 
-# 設定が前回と1つでも変わっていたら、即座に保存する処理
 if (search_query != app_settings.get("search_query") or 
     show_only_favs != app_settings.get("show_only_favs") or 
     max_p != app_settings.get("max_p") or 
@@ -174,26 +173,46 @@ if st.session_state.selected_stock is not None:
                     save_favs(fav_list)
                     st.rerun()
 
-        st.markdown("##### 🏆 AI格付けスコア情報")
-        score_eps = 10 if row['EPS'] > 0 else -50
-        score_per = 15 if 0 < row['PER'] < 15 else (8 if 15 <= row['PER'] < 25 else 0)
-        score_roe = 15 if row['ROE'] > 0.20 else (8 if row['ROE'] > 0.10 else 0)
-        score_margin = 15 if row['利益率'] > 0.20 else (8 if row['利益率'] > 0.10 else 0)
-        score_div = 15 if row['配当利回り'] > 0.04 else (8 if row['配当利回り'] > 0.02 else 0)
+        st.markdown("##### 🏆 AI格付けスコア情報（点数の理由）")
         
-        # PBRの点数ロジック（表示用）
+        # 【大改造】各指標が「なぜその点数になったか」の理由を明確化
+        score_eps = 10 if row['EPS'] > 0 else -50
+        str_eps = f"{score_eps}/10点 (黒字)" if score_eps > 0 else f"{score_eps}/10点 (赤字は大幅減点)"
+
+        score_per = 15 if 0 < row['PER'] < 15 else (8 if 15 <= row['PER'] < 25 else 0)
+        if score_per == 15: str_per = "15/15点 (15倍未満: 超割安)"
+        elif score_per == 8: str_per = "8/15点 (25倍未満: 適正水準)"
+        else: str_per = "0/15点 (25倍以上: 割高)"
+
+        score_roe = 15 if row['ROE'] > 0.20 else (8 if row['ROE'] > 0.10 else 0)
+        if score_roe == 15: str_roe = "15/15点 (20%超: 超高収益体質)"
+        elif score_roe == 8: str_roe = "8/15点 (10%超: 優良)"
+        else: str_roe = "0/15点 (10%以下: 稼ぐ力が弱い)"
+
+        score_margin = 15 if row['利益率'] > 0.20 else (8 if row['利益率'] > 0.10 else 0)
+        if score_margin == 15: str_margin = "15/15点 (20%超: ボロ儲け)"
+        elif score_margin == 8: str_margin = "8/15点 (10%超: 平均的)"
+        else: str_margin = "0/15点 (10%以下: 薄利多売)"
+
+        score_div = 15 if row['配当利回り'] > 0.04 else (8 if row['配当利回り'] > 0.02 else 0)
+        if score_div == 15: str_div = "15/15点 (4%超: 超高配当)"
+        elif score_div == 8: str_div = "8/15点 (2%超: 標準的)"
+        else: str_div = "0/15点 (2%以下: 魅力薄)"
+        
+        # PBRの点数ロジックと理由
         pbr_val = row['PBR']
         str_pbr = "-"
         if strategy == "🏛️ 伝統的割安 (バフェット流)":
-            if 0 < pbr_val <= 1.5: str_pbr = "10/10点"
-            elif 1.5 < pbr_val <= 3.0: str_pbr = "5/10点"
-            else: str_pbr = "0/10点"
+            if 0 < pbr_val <= 1.5: str_pbr = "10/10点 (1.5倍以下: 倒産価値に近く超割安)"
+            elif 1.5 < pbr_val <= 3.0: str_pbr = "5/10点 (3.0倍以下: 適正水準)"
+            else: str_pbr = "0/10点 (3.0倍超: かなり割高)"
+        else:
+            str_pbr = "- (※バフェット戦略を選択した時のみ採点対象)"
         
-        # PBRを指標テーブルに絶対追加
         info_df = pd.DataFrame({
-            "指標": ["現在の株価", "EPS(黒字)", "PER(割安)", "PBR(解散価値)", "ROE(稼ぐ力)", "利益率", "配当利回り"],
+            "指標": ["現在の株価", "EPS(黒字か)", "PER(割安さ)", "PBR(解散価値)", "ROE(稼ぐ力)", "利益率", "配当利回り"],
             "数値": [f"${row['株価']:.2f}", f"${row['EPS']:.2f}", f"{row['PER']:.1f}倍", f"{pbr_val:.2f}倍", f"{row['ROE']*100:.1f}%", f"{row['利益率']*100:.1f}%", f"{row['配当利回り']*100:.1f}%"],
-            "獲得点": [f"-", f"{score_eps}/10点", f"{score_per}/15点", str_pbr, f"{score_roe}/15点", f"{score_margin}/15点", f"{score_div}/15点"]
+            "判定理由（AIの採点基準）": [f"-", str_eps, str_per, str_pbr, str_roe, str_margin, str_div]
         })
         st.table(info_df.set_index("指標"))
 
