@@ -10,23 +10,36 @@ import time
 st.set_page_config(page_title="米国株AI格付け", layout="wide")
 
 # ==========================================
-# 1. 状態管理（リセット防止のセッション管理）
+# 1. 状態管理（お気に入り ＆ 今回追加：前回設定の記憶）
 # ==========================================
 if 'selected_stock' not in st.session_state:
     st.session_state.selected_stock = None
 
 FAV_FILE = 'favorites.json'
+SETTINGS_FILE = 'settings.json'
+
 def load_favs():
     if os.path.exists(FAV_FILE):
-        with open(FAV_FILE, 'r') as f:
-            return json.load(f)
+        try:
+            with open(FAV_FILE, 'r') as f: return json.load(f)
+        except: pass
     return []
 
 def save_favs(favs):
-    with open(FAV_FILE, 'w') as f:
-        json.dump(favs, f)
+    with open(FAV_FILE, 'w') as f: json.dump(favs, f)
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r') as f: return json.load(f)
+        except: pass
+    return {"search_query": "", "show_only_favs": False, "max_p": 150, "strategy": "📈 勢いに乗る (モメンタム)"}
+
+def save_settings(settings):
+    with open(SETTINGS_FILE, 'w') as f: json.dump(settings, f)
 
 fav_list = load_favs()
+app_settings = load_settings()
 
 # ==========================================
 # 2. データ読み込み
@@ -40,27 +53,34 @@ df = pd.read_csv(file_path)
 df.fillna(0, inplace=True) 
 
 for col in ['PBR', 'ROA', '予想PER']:
-    if col not in df.columns:
-        df[col] = 0
+    if col not in df.columns: df[col] = 0
 
 # ==========================================
-# 3. グローバルサイドバー（画面移動しても状態を絶対キープする）
+# 3. グローバルサイドバー（前回設定の自動読み込み＆保存）
 # ==========================================
 st.sidebar.markdown("**🔍 銘柄検索**")
-search_query = st.sidebar.text_input("記号・名前", "", key="search_q", label_visibility="collapsed", placeholder="例: AAPL")
+search_query = st.sidebar.text_input("記号・名前", value=app_settings.get("search_query", ""), key="search_q", label_visibility="collapsed", placeholder="例: AAPL")
 
 st.sidebar.markdown("---")
-show_only_favs = st.sidebar.checkbox("⭐ お気に入り銘柄のみ表示", value=False, key="fav_check")
+show_only_favs = st.sidebar.checkbox("⭐ お気に入り銘柄のみ表示", value=app_settings.get("show_only_favs", False), key="fav_check")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**🕹️ 戦略設定**")
-max_p = st.sidebar.slider("予算上限 ($)", 10, 500, 150, key="budget")
-strategy = st.sidebar.radio(
-    "判定ロジック", 
-    ["📈 勢いに乗る (モメンタム)", "📉 暴落を拾う (逆張り)", "⚖️ 王道バランス (業績重視)", "🏛️ 伝統的割安 (バフェット流)"],
-    label_visibility="collapsed",
-    key="strat"
-)
+max_p = st.sidebar.slider("予算上限 ($)", 10, 500, app_settings.get("max_p", 150), key="budget")
+
+strategies = ["📈 勢いに乗る (モメンタム)", "📉 暴落を拾う (逆張り)", "⚖️ 王道バランス (業績重視)", "🏛️ 伝統的割安 (バフェット流)"]
+saved_strat = app_settings.get("strategy", strategies[0])
+strat_idx = strategies.index(saved_strat) if saved_strat in strategies else 0
+
+strategy = st.sidebar.radio("判定ロジック", strategies, index=strat_idx, label_visibility="collapsed", key="strat")
+
+# 設定が前回と1つでも変わっていたら、即座に保存する処理
+if (search_query != app_settings.get("search_query") or 
+    show_only_favs != app_settings.get("show_only_favs") or 
+    max_p != app_settings.get("max_p") or 
+    strategy != app_settings.get("strategy")):
+    new_settings = {"search_query": search_query, "show_only_favs": show_only_favs, "max_p": max_p, "strategy": strategy}
+    save_settings(new_settings)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**🔄 データの最新化**")
@@ -68,7 +88,6 @@ st.sidebar.markdown("**🔄 データの最新化**")
 if st.sidebar.button("最新ランキングを取得 (約1〜2分)", use_container_width=True):
     progress_bar = st.sidebar.progress(0)
     status_text = st.sidebar.empty()
-    
     tickers = df['記号'].tolist()
     updated_data = []
     total = len(tickers)
@@ -102,8 +121,7 @@ if st.sidebar.button("最新ランキングを取得 (約1〜2分)", use_contain
                     'ROE': roe or 0, '利益率': margin or 0, '配当利回り': div or 0,
                     'PBR': pbr or 0, 'ROA': roa or 0, 'RSI': rsi, 'MA50': ma50
                 })
-        except Exception:
-            pass
+        except Exception: pass
         
         if i % 10 == 0 or i == total - 1:
             progress_bar.progress((i + 1) / total)
@@ -163,10 +181,19 @@ if st.session_state.selected_stock is not None:
         score_margin = 15 if row['利益率'] > 0.20 else (8 if row['利益率'] > 0.10 else 0)
         score_div = 15 if row['配当利回り'] > 0.04 else (8 if row['配当利回り'] > 0.02 else 0)
         
+        # PBRの点数ロジック（表示用）
+        pbr_val = row['PBR']
+        str_pbr = "-"
+        if strategy == "🏛️ 伝統的割安 (バフェット流)":
+            if 0 < pbr_val <= 1.5: str_pbr = "10/10点"
+            elif 1.5 < pbr_val <= 3.0: str_pbr = "5/10点"
+            else: str_pbr = "0/10点"
+        
+        # PBRを指標テーブルに絶対追加
         info_df = pd.DataFrame({
-            "指標": ["現在の株価", "EPS(黒字)", "PER(割安)", "ROE(稼ぐ力)", "利益率", "配当利回り"],
-            "数値": [f"${row['株価']:.2f}", f"${row['EPS']:.2f}", f"{row['PER']:.1f}倍", f"{row['ROE']*100:.1f}%", f"{row['利益率']*100:.1f}%", f"{row['配当利回り']*100:.1f}%"],
-            "獲得点": [f"-", f"{score_eps}/10点", f"{score_per}/15点", f"{score_roe}/15点", f"{score_margin}/15点", f"{score_div}/15点"]
+            "指標": ["現在の株価", "EPS(黒字)", "PER(割安)", "PBR(解散価値)", "ROE(稼ぐ力)", "利益率", "配当利回り"],
+            "数値": [f"${row['株価']:.2f}", f"${row['EPS']:.2f}", f"{row['PER']:.1f}倍", f"{pbr_val:.2f}倍", f"{row['ROE']*100:.1f}%", f"{row['利益率']*100:.1f}%", f"{row['配当利回り']*100:.1f}%"],
+            "獲得点": [f"-", f"{score_eps}/10点", f"{score_per}/15点", str_pbr, f"{score_roe}/15点", f"{score_margin}/15点", f"{score_div}/15点"]
         })
         st.table(info_df.set_index("指標"))
 
@@ -212,18 +239,13 @@ if st.session_state.selected_stock is not None:
                         x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'],
                         name='ローソク足', increasing_line_color='#ff4b4b', decreasing_line_color='#0068c9'
                     ))
-                    
-                    # 【変更箇所】MA線の色をご指定の「黄・緑・白」に変更しました！
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['MA5'], mode='lines', name='MA5(短期)', line=dict(color='yellow', width=1.5)))
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['MA25'], mode='lines', name='MA25(中期)', line=dict(color='#2ca02c', width=1.5)))
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['MA75'], mode='lines', name='MA75(長期)', line=dict(color='white', width=1.5)))
                     
                     fig.update_layout(
-                        margin=dict(l=0, r=0, t=10, b=0),
-                        xaxis_title="", yaxis_title="", height=450,
-                        hovermode="x unified",
-                        xaxis_rangeslider_visible=True,
-                        dragmode="pan"
+                        margin=dict(l=0, r=0, t=10, b=0), xaxis_title="", yaxis_title="", height=450,
+                        hovermode="x unified", xaxis_rangeslider_visible=True, dragmode="pan"
                     )
                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
                 else:
