@@ -8,9 +8,6 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="米国株AI格付け", layout="wide")
 
-# ==========================================
-# 1. 状態管理（人間工学的な画面遷移とデータ保存）
-# ==========================================
 if 'selected_stock' not in st.session_state:
     st.session_state.selected_stock = None
 
@@ -27,9 +24,6 @@ def save_favs(favs):
 
 fav_list = load_favs()
 
-# ==========================================
-# 2. データ読み込みと準備
-# ==========================================
 file_path = 'raw_stock_data.csv'
 if not os.path.exists(file_path):
     st.warning("現在データを収集中です。数分後にリロードしてください。")
@@ -42,14 +36,8 @@ for col in ['PBR', 'ROA', '予想PER']:
     if col not in df.columns:
         df[col] = 0
 
-# ==========================================
-# 3. 画面ルーティング（個別画面か、一覧画面か）
-# ==========================================
-
 if st.session_state.selected_stock is not None:
-    # --------------------------------------------------
-    # 【個別詳細画面】 (銘柄タップ時)
-    # --------------------------------------------------
+    # --- 個別詳細画面 ---
     selected_ticker = st.session_state.selected_stock
     
     if st.button("🔙 銘柄一覧に戻る", use_container_width=True):
@@ -75,19 +63,13 @@ if st.session_state.selected_stock is not None:
                     save_favs(fav_list)
                     st.rerun()
 
-        # 【追加】この銘柄の「8軸AIスコア」をすべて表示！
         st.markdown("##### 🏆 AI格付けスコア情報")
-        
-        # 裏で計算ロジックを再度回して点数を抽出（重複を避けるための安全な処理）
         score_eps = 10 if row['EPS'] > 0 else -50
         score_per = 15 if 0 < row['PER'] < 15 else (8 if 15 <= row['PER'] < 25 else 0)
         score_roe = 15 if row['ROE'] > 0.20 else (8 if row['ROE'] > 0.10 else 0)
         score_margin = 15 if row['利益率'] > 0.20 else (8 if row['利益率'] > 0.10 else 0)
         score_div = 15 if row['配当利回り'] > 0.04 else (8 if row['配当利回り'] > 0.02 else 0)
-        # 戦略点はシンプルに合計から逆算して「戦略合致ボーナス」として表示
-        total_base = score_eps + score_per + score_roe + score_margin + score_div
         
-        # 表の作成
         info_df = pd.DataFrame({
             "指標": ["現在の株価", "EPS(黒字)", "PER(割安)", "ROE(稼ぐ力)", "利益率", "配当利回り"],
             "数値": [f"${row['株価']:.2f}", f"${row['EPS']:.2f}", f"{row['PER']:.1f}倍", f"{row['ROE']*100:.1f}%", f"{row['利益率']*100:.1f}%", f"{row['配当利回り']*100:.1f}%"],
@@ -105,23 +87,20 @@ if st.session_state.selected_stock is not None:
             interval_choice = st.radio("足の長さ", ["日足", "週足", "月足"], horizontal=True)
 
         interval_map = {"日足": "1d", "週足": "1wk", "月足": "1mo"}
-
         now_jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
         current_time_str = now_jst.strftime('%m/%d %H:%M:%S 取得')
 
         with st.spinner("最新チャートを描画中..."):
             try:
                 stock_data = yf.Ticker(selected_ticker)
-                # 移動平均を正確に計算するため、長めの期間（2年分）を一旦取得する
-                hist_full = stock_data.history(period="2y", interval=interval_map[interval_choice])
+                # 移動平均の計算不足を防ぐため、裏で10年分の生データを取得
+                hist_full = stock_data.history(period="10y", interval=interval_map[interval_choice])
                 
                 if not hist_full.empty:
-                    # 移動平均線の計算 (25, 50, 75)
                     hist_full['MA25'] = hist_full['Close'].rolling(window=25).mean()
                     hist_full['MA50'] = hist_full['Close'].rolling(window=50).mean()
                     hist_full['MA75'] = hist_full['Close'].rolling(window=75).mean()
 
-                    # ユーザーが選んだ期間に合わせてデータをカット
                     if interval_choice == "日足":
                         days = {"3ヶ月": 63, "6ヶ月": 126, "1年": 252, "5年": 1260}[period_choice]
                         hist = hist_full.tail(days)
@@ -137,43 +116,29 @@ if st.session_state.selected_stock is not None:
                     st.caption("💡 【ズーム方法】チャート下の「専用バー（ツマミ）」を左右にスライドさせてください。")
                     
                     fig = go.Figure()
-
-                    # 1. ローソク足の追加（日本式：陽線＝赤、陰線＝青）
                     fig.add_trace(go.Candlestick(
-                        x=hist.index,
-                        open=hist['Open'], high=hist['High'],
-                        low=hist['Low'], close=hist['Close'],
-                        name='ローソク足',
-                        increasing_line_color='#ff4b4b', # 上昇（赤）
-                        decreasing_line_color='#0068c9'  # 下落（青）
+                        x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'],
+                        name='ローソク足', increasing_line_color='#ff4b4b', decreasing_line_color='#0068c9'
                     ))
-
-                    # 2. 移動平均線の追加
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['MA25'], mode='lines', name='MA25', line=dict(color='orange', width=1.5)))
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['MA50'], mode='lines', name='MA50', line=dict(color='green', width=1.5)))
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['MA75'], mode='lines', name='MA75', line=dict(color='purple', width=1.5)))
                     
-                    # 3. スマホ操作特化レイアウト（レンジスライダーの有効化）
                     fig.update_layout(
                         margin=dict(l=0, r=0, t=10, b=0),
-                        xaxis_title="",
-                        yaxis_title="",
-                        height=450,
+                        xaxis_title="", yaxis_title="", height=450,
                         hovermode="x unified",
-                        xaxis_rangeslider_visible=True, # 【重要】スマホ用ズームバーをON！
+                        xaxis_rangeslider_visible=True, # ズームバー表示
                         dragmode="pan"
                     )
-                    
                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
                 else:
                     st.warning("チャートデータがありません。")
-            except Exception as e:
-                st.error(f"データの取得に失敗しました。")
+            except Exception:
+                st.error("データの取得に失敗しました。")
 
 else:
-    # --------------------------------------------------
-    # 【一覧画面】 (普段のランキング画面)
-    # --------------------------------------------------
+    # --- 一覧画面 ---
     st.subheader("🇺🇸 米国株AI格付け")
     timestamp = os.path.getmtime(file_path)
     utc_time = datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc)
@@ -182,29 +147,14 @@ else:
 
     search_query = st.sidebar.text_input("🔍 銘柄検索 (例: AAPL)", "")
     st.sidebar.markdown("---")
-    
     show_only_favs = st.sidebar.checkbox("⭐ お気に入り銘柄のみ表示", value=False)
     st.sidebar.markdown("---")
-    
     max_p = st.sidebar.slider("予算上限 ($)", 10, 500, 150)
-    strategy = st.sidebar.radio(
-        "判定ロジック", 
-        [
-            "📈 勢いに乗る (モメンタム)", 
-            "📉 暴落を拾う (逆張り)", 
-            "⚖️ 王道バランス (業績重視)",
-            "🏛️ 伝統的割安 (バフェット流)"
-        ],
-        label_visibility="collapsed"
-    )
+    strategy = st.sidebar.radio("判定ロジック", ["📈 勢いに乗る (モメンタム)", "📉 暴落を拾う (逆張り)", "⚖️ 王道バランス (業績重視)", "🏛️ 伝統的割安 (バフェット流)"], label_visibility="collapsed")
 
     filtered_df = df[df['株価'] <= max_p].copy()
-
     if search_query:
-        filtered_df = filtered_df[
-            filtered_df['記号'].str.contains(search_query.upper(), na=False) | 
-            filtered_df['銘柄'].str.contains(search_query, case=False, na=False)
-        ]
+        filtered_df = filtered_df[filtered_df['記号'].str.contains(search_query.upper(), na=False) | filtered_df['銘柄'].str.contains(search_query, case=False, na=False)]
 
     if show_only_favs:
         if fav_list:
@@ -220,13 +170,9 @@ else:
             score_roe = 15 if row['ROE'] > 0.20 else (8 if row['ROE'] > 0.10 else 0)
             score_margin = 15 if row['利益率'] > 0.20 else (8 if row['利益率'] > 0.10 else 0)
             score_div = 15 if row['配当利回り'] > 0.04 else (8 if row['配当利回り'] > 0.02 else 0)
-
             score_rsi, score_trend, score_f_per, score_pbr, score_roa, score_bonus = 0, 0, 0, 0, 0, 0
             str_rsi, str_trend, str_f_per, str_pbr, str_roa, str_bonus = "-", "-", "-", "-", "-", "-"
-
-            rsi = row['RSI']
-            price = row['株価']
-            ma50 = row['MA50']
+            rsi, price, ma50 = row['RSI'], row['株価'], row['MA50']
             
             if strategy == "📈 勢いに乗る (モメンタム)":
                 if 50 <= rsi <= 70: score_rsi = 20 
@@ -260,7 +206,6 @@ else:
                 str_roa = f"{score_roa}/10"
 
             total_score = score_eps + score_per + score_roe + score_margin + score_div + score_rsi + score_trend + score_f_per + score_pbr + score_roa + score_bonus
-            
             return pd.Series([
                 total_score, f"{score_eps}/10", f"{score_per}/15", f"{score_roe}/15", f"{score_margin}/15", f"{score_div}/15",
                 str_rsi, str_trend, str_bonus, str_f_per, str_pbr, str_roa
@@ -269,7 +214,6 @@ else:
         filtered_df[['💯総合点', 'EPS点', '割安点', 'ROE点', '利益点', '配当点', 'RSI点', 'トレンド点', '業績ボーナス', '予想PER点', 'PBR点', 'ROA点']] = filtered_df.apply(calculate_scores, axis=1)
         filtered_df = filtered_df.sort_values(by='💯総合点', ascending=False)
         filtered_df['順位'] = range(1, len(filtered_df) + 1)
-
         filtered_df['株価'] = filtered_df['株価'].apply(lambda x: f"${x:.2f}")
         filtered_df['EPS'] = filtered_df['EPS'].apply(lambda x: f"${x:.2f}")
         filtered_df['MA50'] = filtered_df['MA50'].apply(lambda x: f"${x:.2f}")
@@ -288,32 +232,20 @@ else:
             else: return "🔥過熱"
 
         filtered_df['過熱感'] = filtered_df['RSI'].apply(rsi_status)
-
         display_df = filtered_df[[
-            '順位', '記号', '銘柄', '💯総合点', 
-            'EPS', 'EPS点', 'PER', '割安点', 'ROE%', 'ROE点', '利益率%', '利益点', '配当%', '配当点',
-            '過熱感', 'RSI点', '株価', 'MA50', 'トレンド点', '業績ボーナス',
-            '予想PER', '予想PER点', 'PBR', 'PBR点', 'ROA%', 'ROA点'
+            '順位', '記号', '銘柄', '💯総合点', 'EPS', 'EPS点', 'PER', '割安点', 'ROE%', 'ROE点', '利益率%', '利益点', '配当%', '配当点',
+            '過熱感', 'RSI点', '株価', 'MA50', 'トレンド点', '業績ボーナス', '予想PER', '予想PER点', 'PBR', 'PBR点', 'ROA%', 'ROA点'
         ]]
-
         display_df = display_df.rename(columns={
-            'EPS': '┃EPS', 'EPS点': 'EPS点(/10)', 'PER': '┃PER', '割安点': '割安点(/15)',
-            'ROE%': '┃ROE', 'ROE点': 'ROE点(/15)', '利益率%': '┃利益率', '利益点': '利益点(/15)',
-            '配当%': '┃配当', '配当点': '配当点(/15)', '過熱感': '┃RSI', 'RSI点': 'RSI点(/20)',
+            'EPS': '┃EPS', 'EPS点': 'EPS点(/10)', 'PER': '┃PER', '割安点': '割安点(/15)', 'ROE%': '┃ROE', 'ROE点': 'ROE点(/15)',
+            '利益率%': '┃利益率', '利益点': '利益点(/15)', '配当%': '┃配当', '配当点': '配当点(/15)', '過熱感': '┃RSI', 'RSI点': 'RSI点(/20)',
             'MA50': '50日平均線', 'トレンド点': 'トレンド点(/10)', '業績ボーナス': '┃業績加点',
-            '予想PER': '┃予想PER', '予想PER点': '予想PER点(/10)', 'PBR': '┃PBR', 'PBR点': 'PBR点(/10)',
-            'ROA%': '┃ROA', 'ROA点': 'ROA点(/10)'
+            '予想PER': '┃予想PER', '予想PER点': '予想PER点(/10)', 'PBR': '┃PBR', 'PBR点': 'PBR点(/10)', 'ROA%': '┃ROA', 'ROA点': 'ROA点(/10)'
         })
 
         st.markdown("👇 **気になる銘柄の行をタップすると詳細画面が開きます**")
-        event = st.dataframe(
-            display_df.set_index('順位'),
-            use_container_width=True,
-            on_select="rerun",
-            selection_mode="single-row"
-        )
+        event = st.dataframe(display_df.set_index('順位'), use_container_width=True, on_select="rerun", selection_mode="single-row")
 
         if len(event.selection.rows) > 0:
-            selected_idx = event.selection.rows[0]
-            st.session_state.selected_stock = display_df.iloc[selected_idx]['記号']
+            st.session_state.selected_stock = display_df.iloc[event.selection.rows[0]]['記号']
             st.rerun()
