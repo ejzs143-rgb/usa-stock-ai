@@ -52,13 +52,9 @@ if not os.path.exists(file_path):
 df = pd.read_csv(file_path)
 df.fillna(0, inplace=True) 
 
-# 旧バージョンのCSVファイルには無い「最新指標」の列を自動で補完
 new_cols = ['PBR', 'ROA', '予想PER', 'FCFマージン', '粗利率', 'アクルーアル', 'MACD_GC']
 for col in new_cols:
     if col not in df.columns: df[col] = 0
-
-if 'MACD_GC' not in df.columns or df['FCFマージン'].sum() == 0:
-    st.info("💡 【AIからのお知らせ】新指標（FCFマージンやMACD等）のデータがまだありません。左のメニューから「最新ランキングを取得」を実行してください。")
 
 # ==========================================
 # 3. グローバルサイドバー
@@ -112,7 +108,6 @@ if st.sidebar.button("最新ランキングを取得 (約1〜3分)", use_contain
                 pbr = info.get('priceToBook', 0)
                 roa = info.get('returnOnAssets', 0)
                 
-                # RSIの計算
                 delta = hist['Close'].diff()
                 gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                 loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -120,7 +115,6 @@ if st.sidebar.button("最新ランキングを取得 (約1〜3分)", use_contain
                 rsi = 100 - (100 / (1 + rs.iloc[-1])) if not pd.isna(rs.iloc[-1]) else 50
                 ma50 = hist['Close'].rolling(window=50).mean().iloc[-1]
 
-                # MACDの計算
                 exp1 = hist['Close'].ewm(span=12, adjust=False).mean()
                 exp2 = hist['Close'].ewm(span=26, adjust=False).mean()
                 macd = exp1 - exp2
@@ -128,7 +122,6 @@ if st.sidebar.button("最新ランキングを取得 (約1〜3分)", use_contain
                 macd_hist = macd - macd_signal
                 is_macd_gc = 1 if (macd_hist.iloc[-1] > 0) and (macd_hist.iloc[-2] <= 0) else 0
 
-                # 財務データからの高度計算
                 financials = stock.financials
                 cashflow = stock.cashflow
                 balance_sheet = stock.balance_sheet
@@ -213,7 +206,6 @@ if st.session_state.selected_stock is not None:
 
         st.markdown("##### 🏆 AI格付けスコア情報（グラデーション精密採点）")
         
-        # 連続的なスコア計算（表示用）
         score_eps = 10 if row['EPS'] > 0 else -50
         score_per = max(0, min(15, (25 - row['PER']) / 15 * 15)) if row['PER'] > 0 else 0
         score_roe = max(0, min(15, (row['ROE'] - 0.05) / 0.15 * 15))
@@ -222,19 +214,22 @@ if st.session_state.selected_stock is not None:
         score_gross = max(0, min(10, (row['粗利率'] - 0.20) / 0.20 * 10))
 
         str_eps = f"{score_eps:.1f}/10点 (黒字)" if score_eps > 0 else f"{score_eps:.1f}/10点 (赤字)"
-        str_per = f"{score_per:.1f}/15点 (10倍で満点、25倍で0点)"
+        str_per = f"{score_per:.1f}/15点 (10倍で満点、25倍で0点)" if row['PER'] > 0 else "0.0/15点 (データなし/赤字)"
         str_roe = f"{score_roe:.1f}/15点 (20%で満点、5%で0点)"
         str_margin = f"{score_margin:.1f}/15点 (純利益率の連続評価)"
         
-        # 聖杯モード特有の表示
         str_fcf = f"{score_fcf:.1f}/10点 (現金の創出力)" if strategy == "👑 究極の聖杯 (新旧融合)" else "-"
         str_gross = f"{score_gross:.1f}/10点 (ブランド力・堀)" if strategy == "👑 究極の聖杯 (新旧融合)" else "-"
         macd_status = "✨ 反発初動 (ゴールデンクロス)" if row['MACD_GC'] == 1 else "待機中"
-        accruals_status = "✅ 健全 (マイナス)" if row['アクルーアル'] < 0 else "⚠️ 警戒 (粉飾・利益先食いリスク)"
+        accruals_status = "✅ 健全 (マイナス)" if row['アクルーアル'] < 0 else ("⚠️ 警戒" if row['アクルーアル'] > 0 else "データなし")
+
+        val_fcf = f"{row['FCFマージン']*100:.1f}%" if row['FCFマージン'] != 0 else "-"
+        val_gross = f"{row['粗利率']*100:.1f}%" if row['粗利率'] != 0 else "-"
+        val_per = f"{row['PER']:.1f}倍" if row['PER'] > 0 else "-"
 
         info_df = pd.DataFrame({
             "指標": ["現在の株価", "EPS(黒字か)", "PER(割安さ)", "ROE(稼ぐ力)", "FCFマージン(現金創出)", "粗利率(価格決定力)", "アクルーアル(利益真贋)", "MACD(底打ち反発)"],
-            "数値": [f"${row['株価']:.2f}", f"${row['EPS']:.2f}", f"{row['PER']:.1f}倍", f"{row['ROE']*100:.1f}%", f"{row['FCFマージン']*100:.1f}%", f"{row['粗利率']*100:.1f}%", f"{row['アクルーアル']:.3f}", macd_status],
+            "数値": [f"${row['株価']:.2f}", f"${row['EPS']:.2f}", val_per, f"{row['ROE']*100:.1f}%", val_fcf, val_gross, f"{row['アクルーアル']:.3f}", macd_status],
             "精密採点 / AIの評価": ["-", str_eps, str_per, str_roe, str_fcf, str_gross, accruals_status, "※聖杯モードでは反発時+15点加算"]
         })
         st.table(info_df.set_index("指標"))
@@ -310,7 +305,6 @@ else:
             filtered_df = pd.DataFrame(columns=filtered_df.columns)
 
     if not filtered_df.empty:
-        # グラデーション配点ロジック
         def calculate_scores(row):
             score_eps = 10 if row['EPS'] > 0 else -50
             score_per = max(0, min(15, (25 - row['PER']) / 15 * 15)) if row['PER'] > 0 else 0
@@ -322,19 +316,17 @@ else:
             rsi, price, ma50 = row['RSI'], row['株価'], row['MA50']
             
             if strategy == "👑 究極の聖杯 (新旧融合)":
-                # FCFマージン(10点満点)、粗利率(10点満点)、MACDクロス(15点)、RSI安値圏(10点)、アクルーアル健全(5点)
                 score_fcf = max(0, min(10, (row['FCFマージン']) / 0.15 * 10))
                 score_gross = max(0, min(10, (row['粗利率'] - 0.20) / 0.20 * 10))
                 if row['MACD_GC'] == 1: score_macd = 15
                 if rsi < 50: score_strat += 10
                 if row['アクルーアル'] < 0: score_strat += 5
-                
             elif strategy == "📈 勢いに乗る (モメンタム)":
                 if 50 <= rsi <= 70: score_strat = 20 
                 elif rsi > 75: score_strat = -20 
                 if price > ma50 * 1.05: score_strat += 10 
             elif strategy == "📉 暴落を拾う (逆張り)":
-                score_strat = max(0, min(20, (50 - rsi) / 20 * 20)) # RSIが30以下なら満点
+                score_strat = max(0, min(20, (50 - rsi) / 20 * 20))
                 if price < ma50 * 0.90: score_strat += 10 
             elif strategy == "⚖️ 王道バランス (業績重視)":
                 if 40 <= rsi <= 60: score_strat = 15 
@@ -344,23 +336,26 @@ else:
                 score_strat += max(0, min(10, (row['ROA']) / 0.05 * 10))
 
             total_score = score_eps + score_per + score_roe + score_margin + score_div + score_strat + score_fcf + score_gross + score_macd
+            
+            # 一覧画面でのスコア表示用文字列（例: "15.0点"）
             return pd.Series([
-                total_score, score_eps, score_per, score_roe, score_margin, score_div, score_fcf, score_gross, score_macd
+                total_score, f"{score_eps:.1f}", f"{score_per:.1f}", f"{score_roe:.1f}", 
+                f"{score_fcf:.1f}", f"{score_gross:.1f}", f"{score_macd:.1f}"
             ])
 
-        filtered_df[['💯総合点', 'EPS点', '割安点', 'ROE点', '利益点', '配当点', 'FCF点', '粗利点', 'MACD点']] = filtered_df.apply(calculate_scores, axis=1)
+        filtered_df[['💯総合点', 'EPS点', 'PER点', 'ROE点', 'FCF点', '粗利点', 'MACD点']] = filtered_df.apply(calculate_scores, axis=1)
         filtered_df = filtered_df.sort_values(by='💯総合点', ascending=False)
         filtered_df['順位'] = range(1, len(filtered_df) + 1)
         
-        # 表示用のフォーマット整形
         filtered_df['💯総合点'] = filtered_df['💯総合点'].apply(lambda x: f"{x:.1f}点")
         filtered_df['株価'] = filtered_df['株価'].apply(lambda x: f"${x:.2f}")
-        filtered_df['EPS'] = filtered_df['EPS'].apply(lambda x: f"${x:.2f}")
+        # 赤字やデータがない場合はハイフンにする
         filtered_df['PER'] = filtered_df['PER'].apply(lambda x: f"{x:.1f}倍" if x > 0 else "-")
         filtered_df['ROE%'] = filtered_df['ROE'].apply(lambda x: f"{x*100:.1f}%" if x > 0 else "-")
-        filtered_df['FCFマージン%'] = filtered_df['FCFマージン'].apply(lambda x: f"{x*100:.1f}%" if x > 0 else "-")
-        filtered_df['粗利率%'] = filtered_df['粗利率'].apply(lambda x: f"{x*100:.1f}%" if x > 0 else "-")
-        filtered_df['アクルーアル'] = filtered_df['アクルーアル'].apply(lambda x: "✅健全" if x < 0 else "⚠️警戒")
+        filtered_df['FCFマージン%'] = filtered_df['FCFマージン'].apply(lambda x: f"{x*100:.1f}%" if x != 0 else "-")
+        filtered_df['粗利率%'] = filtered_df['粗利率'].apply(lambda x: f"{x*100:.1f}%" if x != 0 else "-")
+        
+        filtered_df['アクルーアル'] = filtered_df.apply(lambda row: "✅健全" if row['アクルーアル'] < 0 else ("⚠️警戒" if row['アクルーアル'] > 0 else "-"), axis=1)
         filtered_df['MACD反発'] = filtered_df['MACD_GC'].apply(lambda x: "🚀点灯" if x == 1 else "-")
 
         def rsi_status(rsi):
@@ -370,16 +365,16 @@ else:
             elif rsi < 70: return "📈上昇"
             else: return "🔥過熱"
 
-        filtered_df['過熱感'] = filtered_df['RSI'].apply(rsi_status)
+        filtered_df['過熱感(RSI)'] = filtered_df['RSI'].apply(rsi_status)
         
-        # モードによって表示する列を切り替え（聖杯モードは最新指標を強調）
+        # モードによって表示する列とスコアの内訳をしっかり見せる
         if strategy == "👑 究極の聖杯 (新旧融合)":
             display_df = filtered_df[[
-                '順位', '記号', '銘柄', '💯総合点', '過熱感', 'MACD反発', 'FCFマージン%', '粗利率%', 'アクルーアル', 'PER', 'ROE%', '株価'
+                '順位', '記号', '銘柄', '💯総合点', '過熱感(RSI)', 'MACD反発', 'MACD点', 'FCFマージン%', 'FCF点', '粗利率%', '粗利点', 'アクルーアル', 'PER', 'PER点', 'ROE%', 'ROE点', '株価'
             ]]
         else:
             display_df = filtered_df[[
-                '順位', '記号', '銘柄', '💯総合点', 'EPS', 'PER', 'ROE%', '過熱感', '株価'
+                '順位', '記号', '銘柄', '💯総合点', '過熱感(RSI)', 'PER', 'PER点', 'ROE%', 'ROE点', '株価'
             ]]
 
         st.markdown("👇 **気になる銘柄の行をタップすると詳細（なぜその点数になったか）が開きます**")
