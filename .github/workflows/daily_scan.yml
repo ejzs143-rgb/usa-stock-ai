@@ -1,10 +1,12 @@
 name: Daily Stock Scan
+
 on:
   schedule:
+    # 7:30 JST（22:30 UTC）= 米国市場終了後 → メインのデータ更新＋朝通知
+    # 23:30 JST（14:30 UTC）= 補助更新（任意、不要なら削除可）
     - cron: '30 14,22 * * *'
-  workflow_dispatch:
+  workflow_dispatch:  # 手動実行ボタン
 
-# ロボットにCSVファイルの保存（書き込み）を許可する魔法のブロック
 permissions:
   contents: write
 
@@ -12,20 +14,33 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
       - name: Install dependencies
         run: |
-          pip install pandas yfinance requests numpy lxml yahooquery
-      - name: Run scan
+          pip install pandas yfinance requests numpy lxml
+
+      # ステップ1: データ収集（scan_script.py）
+      - name: Collect stock data
         run: python scan_script.py
+
+      # ステップ2: CSVをGitHubにコミット（app.pyが読めるように）
       - name: Commit results
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add raw_stock_data.csv
-          git commit -m "Update stock data" || exit 0
+          git diff --staged --quiet || git commit -m "Update stock data $(date -u +%Y-%m-%d)"
           git push
+
+      # ステップ3: LINE通知（auto_screener.py）
+      - name: Send LINE alerts
+        env:
+          LINE_ACCESS_TOKEN: ${{ secrets.LINE_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: python auto_screener.py
