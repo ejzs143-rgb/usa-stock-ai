@@ -1,13 +1,3 @@
-“””
-scan_script.py v4
-追加:
-
-- 52週高値, 52週下落率
-- 出来高静寂→急増フラグ (vol_dryup_spike)
-- ボリンジャーバンド・スクイーズフラグ (bb_squeeze)
-- RSIダイバージェンスフラグ (rsi_divergence)
-  “””
-
 import pandas as pd
 import yfinance as yf
 import numpy as np
